@@ -1,54 +1,56 @@
 # Laboratorio 3: Acceso a Disco y Costo de E/S (I/O)
-**Autor:** Mateo Upegui  
+**Autor:** Mateo Upegui Borja  
 **Curso:** Diseño de Bases de Datos (UdeA)
 
-## Etapa 1: Caracterización del Equipo
+## 1. Especificaciones del equipo
 
-| Parámetro                        | Valor de Referencia |
-| :------------------------------- | :------------------ |
-| **Sistema Operativo**            | macOS 26.3.1        |
-| **Modelo de CPU**                | Apple M1 Max        |
-| **Núcleos de CPU**               | 10 Cores            |
-| **RAM Total**                    | 32 GB               |
-| **Tecnología de Almacenamiento** | Apple NVMe SSD      |
+| Parámetro                        | Valor de Referencia   |
+| :------------------------------- | :-------------------- |
+| **Sistema Operativo**            | macOS 15.4 (24E5263i) |
+| **Modelo de CPU**                | Apple M1 Max          |
+| **Núcleos de CPU**               | 10 Cores (8P + 2E)    |
+| **RAM Total**                    | 32 GB                 |
+| **Tecnología de Almacenamiento** | Apple NVMe SSD        |
 
-## Etapa 2: Resultados Experimentales
+## 2. Resultados del experimento
 
-Las siguientes gráficas fueron generadas mediante la ejecución del notebook `disk_io_lab_guided.ipynb`.
+Las siguientes gráficas fueron generadas mediante la ejecución del notebook `disk_io_lab_guided.ipynb` utilizando un archivo de prueba de 8 GiB y el flag `F_NOCACHE` para mitigar el sesgo del caché sistema operativo.
 
-### 1. Comparación de Throughput
+### Comparación de Throughput (MiB/s)
 ![Throughput](images/fig_throughput.png)
 
-### 2. Secuencial: Teoría vs. Práctica
+### Secuencial: Teoría vs. Práctica
 ![Tiempo Secuencial](images/fig_tiempo_teoria_vs_practica_secuencial.png)
 
-### 3. Aleatorio: Teoría vs. Práctica
+### Aleatorio: Teoría vs. Práctica
 ![Tiempo Aleatorio](images/fig_tiempo_teoria_vs_practica_aleatorio.png)
 
-### 4. Speedup (Ventaja Secuencial)
+### Speedup (Ventaja Secuencial)
 ![Speedup](images/fig_speedup.png)
 
-## Etapa 3: Análisis e Interpretación
+## 3. Análisis y conclusiones
 
 ### Preguntas de Análisis Científico
 
-**1. Diferenciales de rendimiento (Secuencial vs. Aleatorio):**
-El mayor diferencial se observó con bloques de **4 KB**: acceso secuencial de **234 MiB/s** frente a acceso aleatorio de **45.15 MiB/s**, equivalente a un factor de aproximadamente **5.2x** a favor del patrón secuencial. Este resultado es consistente con el modelo de costo I/O, donde el acceso aleatorio incrementa el número de accesos no contiguos y por tanto acumula más latencia.
+**1. Diferencial de Desempeño**
+El patrón de acceso secuencial resultó ser significativamente más eficiente que el aleatorio en todos los tamaños de bloque evaluados. La mayor diferencia que observamos se dió con bloques de **4 KB**, donde el acceso secuencial alcanzó **194.91 MiB/s** frente a los **35.44 MiB/s** del aleatorio, lo que representa un speedup de aproximadamente **5.5x**.  
 
-**2. El efecto del tamaño de bloque en los costos de acceso aleatorio:**
-El throughput aleatorio aumentó de forma marcada al incrementar el tamaño de bloque: de **45.15 MiB/s** en 4 KB hasta **1121.03 MiB/s** en 256 KB. Esto ocurre porque cada acceso aleatorio transfiere más datos, amortizando el costo fijo de latencia por operación.
+Esta diferencia confirma la hipótesis de que el costo de "búsqueda" lógica y el overhead del controlador dominan el tiempo de ejecución cuando el volumen de datos por operación es pequeño, incluso en ausencia de componentes mecánicos.
 
-**3. Correlaciones y desviaciones del modelo teórico:**
-Para ajustar teoría y práctica se calibró el modelo con corridas repetidas y mínimos cuadrados, usando:
+**2. Efecto del Tamaño de Bloque**
+El incremento en el tamaño de bloque de lectura en cierto sentido mitiga el costo de latencia ($\alpha$). En el acceso aleatorio, el throughput aumentó al pasar de **35.44 MiB/s** (4 KB) a **1242.91 MiB/s** (256 KB).  
 
-- $T = \alpha M + \beta \cdot DataSize$
-- $M = 1$ para secuencial
-- $M = num\_reads$ para aleatorio
+Al transferir más datos por cada evento de acceso, el costo fijo de localizar el bloque se vuelve despreciable frente al tiempo de transferencia de los datos ($\beta \cdot DataSize$), permitiendo que el hardware se acerque a su ancho de banda teórico máximo.
 
-El ajuste resultó en **$\alpha = 116.49\,\mu s$** y **$\beta = 2.040803164196\times10^{-9}\,s/B$** (throughput implícito ~**0.46 GB/s**). Aunque la calibración mejora la escala global, persisten desviaciones porque el modelo simplifica efectos reales como paralelismo interno del SSD, cachés internas y variabilidad del sistema.
+**3. Correlación con la Teoría**
+El hardware se alejó más del modelo teórico en el patrón de acceso secuencial a través de los diferentes tamaños de bloque. Mientras que el modelo $T = \alpha M + \beta \cdot DataSize$ predice un comportamiento casi constante para el patrón secuencial ($M=1$), en la práctica observamos que el rendimiento real se multiplicó por **6.5x** al aumentar el bloque de 4 KB a 256 KB.  
 
-**4. ¿Por qué el acceso aleatorio sigue siendo costoso en los SSD?**
-Aun en SSD, el acceso aleatorio sigue siendo costoso porque cada operación implica una latencia de control/cola y menor localidad espacial. Con bloques pequeños, esa latencia domina el tiempo total; por eso se observó una diferencia de **5.2x** entre secuencial y aleatorio en 4 KB.
+Factores físicos como el las optmizaciones del hardware NVMe y el prefetching a nivel de firmware explican que el dispositivo real sea mucho más capaz de optimizar transferencias grandes de lo que sugiere el modelo lineal simple.
 
-**5. Implicaciones para el diseño de motores de bases de datos:**
-Los resultados sugieren diseñar motores y planes de consulta que favorezcan acceso secuencial, lecturas por lotes y alta localidad de datos. En cargas intensivas de I/O, minimizar lecturas aleatorias pequeñas puede producir mejoras grandes de rendimiento y estabilidad.
+**4. Costo de Acceso en SSD**
+Incluso en un SSD, el acceso aleatorio es más costoso que el acceso secuencia, esto se debe a que el un patrón de acceso aleatorio impide que el controlador prediga y pre-cargue los siguientes bloques en la memoria interna del dispositivo. En nuestras pruebas, esto se tradujo en una penalización de tiempo de **231.18 s** para leer el dataset de forma aleatoria (4 KB) frente a solo **42.03 s** de forma secuencial.
+
+**5. Implicaciones en Sistemas**
+Para el diseño de un Motor de Base de Datos, los resultados sugieren una estrategia de **I/O secuencial**. Idealmente se implementarían estructuras de datos que garantizen las escrituras secuenciales e indices que puedan asegurar que los registros relacionados residan en bloques contiguos.
+
+Al maximizar la localidad de datos, el sistema puede operar en el rango de los **1.2 GiB/s** medidos en bloques grandes, evitando caer en el cuello de botella de las decenas de MiB/s asociado a las lecturas aleatorias pequeñas.
